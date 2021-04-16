@@ -24,6 +24,6 @@ setup(
                  'Operating System :: OS Independent',
                  'License :: OSI Approved :: MIT License'],
     keywords='GIS lidar least cost path LCP',
-	install_requires=['scipy','pandas','python-igraph','numpy'],
+	install_requires=['scipy','pandas','python-igraph','numpy','geopandas'],
 
 	)

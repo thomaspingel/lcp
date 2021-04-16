@@ -1,6 +1,7 @@
 import igraph
 import numpy as np
 import pandas as pd
+import geopandas
 from shapely.geometry import LineString
 from skimage.graph import MCP_Geometric, MCP
 from skimage import graph
