@@ -6,13 +6,29 @@ from shapely.geometry import LineString
 from skimage.graph import MCP_Geometric, MCP
 from skimage import graph
 from pyproj import Transformer
+from scipy import stats
 
-#%% LCP FUNCTIONS
-
-# From Tobler. 1993. THREE PRESENTATIONS ON GEOGRAPHICAL ANALYSIS AND MODELING
-# Returns velocity in km/hr
 def cost_tobler_hiking_function(S,symmetric=True):
+    """
+    Applies Tobler's Hiking Function to slope data supplied in DEGREES.
 
+    From Tobler. 1993. Three Presentation on Geographical Analysis and Modeling.
+    
+    Simple Example:
+
+    C = lcp.cost_tobler_hiking_function(S,symmetric=True)
+    
+    Parameters:
+    - 'S' is an array (any dimension) of slope values in DEGREES.
+    - 'symmetric' flags whether to consider slope values symmetrically.  Note that this_end
+            is NOT the same as just taking the positive values.  This returns an average
+            of the positive and negative value for the given slope.
+    
+    Returns:
+    - 'C' a cost surface of velocity in km/hr
+
+    """    
+    
     # Convert to dz/dx
     S = np.tan(np.deg2rad(S))
     
@@ -24,16 +40,27 @@ def cost_tobler_hiking_function(S,symmetric=True):
         
     return 1 / V
 
-#%%%
-# From Rademaker et al. (2012)
-
-# weight of traveler is given in kg
-# weight of pack is given in kg
-# terrain coefficients greater than 1 introduce "friction"
-# velocity is Walking speed in meters per second
 
 def cost_rademaker(S,weight=50,pack_weight=0,terrain_coefficient=1.1,velocity=1.2):
-   
+    """
+    Applies Rademaker et al's model (2012) to slope values for LCP calculation.
+    
+    Simple Example:
+
+    C = lcp.cost_rademaker(S,weight=50,pack_weight=0,terrain_coefficient=1.1,velocity=1.2)
+    
+    Parameters:
+    - 'S' is an array (any dimension) of slope values in DEGREES.
+    - 'weight' is weight of traveler is given in kg
+    - 'pack_weight' is cargo weight, given in kg
+    - 'terrain_coefficient' is a value to introduce "friction".  Values greater than
+            one have more than 'average' friction.
+    - 'velocity' is mean walking speed in meters per second
+    
+    Returns:
+    - 'C' a cost surface of shape S.
+
+    """     
     # Rademaker assumes a grade in percent (0 to 100, rather than 0 to 1):
     G = 100 * np.arctan(np.deg2rad(S))
     
@@ -51,14 +78,36 @@ def cost_rademaker(S,weight=50,pack_weight=0,terrain_coefficient=1.1,velocity=1.
 #%%
 
 def cost_pingel_exponential(S,scale_factor=9.25):
+    """
+    Applies the exponental LCP cost function described by Pingel (2010). 
+    
+    Simple Example:
 
+    C = lcp.cost_pingel_exponential(S,scale_factor=9.25)
+    
+    Parameters:
+    - 'S' is an array (any dimension) of slope values in DEGREES.
+    - 'scale_factor' is a value in degrees that generally corresponds to the mean slope
+      (in degrees) of a path network.  Larger values represent a larger tolerance for 
+      steeper slopes.  Smaller values will cause an LCP to avoid steeper slopes.
+
+    """  
+    
     EXP = stats.expon.pdf(0,0,scale_factor) / stats.expon.pdf(S,0,scale_factor) 
     
     return EXP
     
-#%%    
+ 
     
 def ve(S,ve=2.3):
+    """
+    Applies a vertical exaggeration to a slope raster and returns it.  Slope raster must be in DEGREES.
+    
+    Simple Example:
+
+    S_ve = lcp.ve(S,2.3)
+
+    """      
     S = np.tan(np.deg2rad(S))
     S = np.rad2deg(np.arctan(ve *  S))
     return S
@@ -67,7 +116,16 @@ def ve(S,ve=2.3):
 #%%
 
 def get_lists(nodes,edges):
+    """
+    Simple Example:
+
+    start_list, end_list, ids, start_coords, end_coords = lcp.get_lists(nodes, edges)    
     
+    Internal method to transform nodes and edges into lists of start coords and lists of lists of end coords.
+    
+    Returns: start_list, end_list, ids, start_coords, end_coords
+    
+    """        
     nodes['coords'] = list(zip(nodes.iloc[:,0], nodes.iloc[:,1]))  
     
     start_list = edges.iloc[:,0].unique()
@@ -92,9 +150,35 @@ def get_lists(nodes,edges):
     return start_list, end_list, ids, start_coords, end_coords
 
 
-#%%
 def direct_routes(nodes,edges):
+    """
     
+    Returns a straight-line path between edges.
+    
+    Simple Example:
+
+    gdf = lcp.direct_routes(nodes, edges)
+    
+    Parameters:
+    - 'nodes' is a Pandas DataFrame where the first column is a unique ID, the second is
+                an x coordinate (e.g., longitude) and the third is a y coordinate (e.g.,
+                latitude).
+    - 'edges' is a Pandas DataFrame were the first column is a source ID (matching a node)
+                and the second column is a destination.  At the moment, we assume no 
+                directionality / edges are symmetric.
+    - 'array' is a numpy array representing the cost surface.
+    - 'meta' is a dictionary, that must contain 'crs' and 'transform' items corresponding
+                to those returned by rasterio.  neilpy.imread returns such a dictionary
+                by default.
+    - 'label' is used to identify the type of cost path/surface in the GeoDataFrame output
+                rows.
+                
+    Output:
+    - 'gdf' is a GeoPandas GeoDataFrame with fields 'ids' describing the source and target 
+                , 'label' corresponding to the label, and a geometry field containing the
+                path in shapely / WKT format.                
+
+    """      
     start_list, end_list, ids, start_coords, end_coords = get_lists(nodes,edges)
 
     gdf = pd.DataFrame()
@@ -103,7 +187,7 @@ def direct_routes(nodes,edges):
         df = pd.DataFrame()
         these_end_coords = end_coords[i]
         df['ids'] = ids[i]
-        df['method'] = 'direct'
+        df['label'] = 'direct'
         df['geometry'] = [LineString([this_start,this_end]) for this_end in these_end_coords]
         
         gdf = gdf.append(df,ignore_index=True)
@@ -112,10 +196,27 @@ def direct_routes(nodes,edges):
     
     return gdf
 
-#%%
+
 
 def lcp_coordinate_conversion(start_coords,end_coords,crs,transform):
+    """
+    Simple Example:
+
+    network = lcp.create_raster_network(array)
     
+    Parameters:
+    - 'start_coords' is a list of tuples (lon,lat)
+    - 'end_coords' is a list of lists of tuples.  Each list of end points corresponds to 
+           a start point, so len(start_coords) must equal len(end_coords), although each 
+           list OF end points can be of any length one or greater.
+    - 'crs' is a Coordinate Reference System of the type returned by rasterio (or neilpy).
+    - 'transform' is an Affine transformation matrix as returned by rasterio (or neilpy).
+                
+    Output:
+    - 'converted_start_coords' is a list of tuples of PIXEL coordinates.
+    - 'converted_end_coords' is a list of list of tupes of pixel coordiantes.
+
+    """       
     converted_start_coords = []
     converted_end_coords = []
     
@@ -140,12 +241,32 @@ def lcp_coordinate_conversion(start_coords,end_coords,crs,transform):
     return converted_start_coords, converted_end_coords
    
 
-
-
-#%%
-
 def get_areal_routes(nodes,edges,surface,meta,label='areal'):
+    """
+    Simple Example:
+
+    gdf = lcp.get_areal_routes(nodes, edges, array, meta, label)
     
+    Parameters:
+    - 'nodes' is a Pandas DataFrame where the first column is a unique ID, the second is
+                an x coordinate (e.g., longitude) and the third is a y coordinate (e.g.,
+                latitude).
+    - 'edges' is a Pandas DataFrame were the first column is a source ID (matching a node)
+                and the second column is a destination.  At the moment, we assume no 
+                directionality / edges are symmetric.
+    - 'array' is a numpy array representing the cost surface.
+    - 'meta' is a dictionary, that must contain 'crs' and 'transform' items corresponding
+                to those returned by rasterio.  neilpy.imread returns such a dictionary
+                by default.
+    - 'label' is used to identify the type of cost path/surface in the GeoDataFrame output
+                rows.
+                
+    Output:
+    - 'gdf' is a GeoPandas GeoDataFrame with fields 'ids' describing the source and target 
+                , 'label' corresponding to the label, and a geometry field containing the
+                path in shapely / WKT format.                
+
+    """        
     gdf = pd.DataFrame()
 
     print('Creating surface network for',label)
@@ -169,7 +290,7 @@ def get_areal_routes(nodes,edges,surface,meta,label='areal'):
         
         df = pd.DataFrame()
         df['ids'] = ids[i]
-        df['method'] = label
+        df['label'] = label
         df['geometry'] = geometries
         gdf = gdf.append(df,ignore_index=True)
         
@@ -179,10 +300,24 @@ def get_areal_routes(nodes,edges,surface,meta,label='areal'):
     return gdf
 
 
-#%% 
 
 def create_raster_network(X):
+    """
+    Simple Example:
+
+    network = lcp.create_raster_network(array)
     
+    Parameters:
+    - 'array' is a numpy array representing the cost surface.
+                
+    Output:
+    - 'network' is a Pandas DataFrame with fields 'source' and 'target' representing 1D
+           (flattened) indices, source_value and target_value for pixel data, 'distance'
+           which is the pixel distance (1 for orthogonal, 2**.5 for diagonal).  These
+           should be used directly by the operator to calculate a 'weight' field 
+           before passing to lcp.get_linear_routes()           
+
+    """       
     m,n = np.shape(X)
     
     I = np.reshape(np.arange(np.size(X),dtype=np.int32),np.shape(X))
@@ -208,9 +343,37 @@ def create_raster_network(X):
     return df
 
 
-#%%
+
 
 def get_linear_routes(nodes,edges,df,meta,label='linear'):
+    """
+    Simple Example:
+
+    network = lcp.create_raster_network(array)
+    network['weight'] = np.abs(network['source_value'] - network['target_value']) / network['distance']
+    gdf = lcp.get_linear_routes(nodes, edges, network, meta, label)
+    
+    Parameters:
+    - 'nodes' is a Pandas DataFrame where the first column is a unique ID, the second is
+                an x coordinate (e.g., longitude) and the third is a y coordinate (e.g.,
+                latitude).
+    - 'edges' is a Pandas DataFrame were the first column is a source ID (matching a node)
+                and the second column is a destination.  At the moment, we assume no 
+                directionality / edges are symmetric.
+    - 'network' is a Pandas DataFrame created by lcp.create_raster_network().  It MUST 
+                include a column called 'weight'.
+    - 'meta' is a dictionary, that must contain 'crs' and 'transform' items corresponding
+                to those returned by rasterio.  neilpy.imread returns such a dictionary
+                by default.
+    - 'label' is used to identify the type of cost path/surface in the GeoDataFrame output
+                rows.
+                
+    Output:
+    - 'gdf' is a GeoPandas GeoDataFrame with fields 'ids' describing the source and target 
+                , 'label' corresponding to the label, and a geometry field containing the
+                path in shapely / WKT format.                
+
+    """         
     
     img_dim = (meta['height'],meta['width'])
 
@@ -232,7 +395,7 @@ def get_linear_routes(nodes,edges,df,meta,label='linear'):
         geometries = [LineString(np.vstack(meta['transform']*route2).T) for route2 in routes2] 
         df = pd.DataFrame()
         df['ids'] = ids[i]
-        df['method'] = label
+        df['label'] = label
         df['geometry'] = geometries
         gdf = gdf.append(df,ignore_index=True)
 
@@ -243,3 +406,23 @@ def get_linear_routes(nodes,edges,df,meta,label='linear'):
 def coord_transform(x,y,from_epsg,to_epsg):
     transformer = Transformer.from_crs(from_epsg,to_epsg,always_xy=True)
     return transformer.transform(x,y)
+    
+def ashift(surface,direction,n=1):
+    surface = surface.copy()
+    if direction==0:
+        surface[n:,n:] = surface[0:-n,0:-n]
+    elif direction==1:
+        surface[n:,:] = surface[0:-n,:]
+    elif direction==2:
+        surface[n:,0:-n] = surface[0:-n,n:]
+    elif direction==3:
+        surface[:,0:-n] = surface[:,n:]
+    elif direction==4:
+        surface[0:-n,0:-n] = surface[n:,n:]
+    elif direction==5:
+        surface[0:-n,:] = surface[n:,:]
+    elif direction==6:
+        surface[0:-n,n:] = surface[n:,0:-n]
+    elif direction==7:
+        surface[:,n:] = surface[:,0:-n]
+    return surface
