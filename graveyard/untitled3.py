@@ -1,12 +1,47 @@
-import igraph
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Apr 16 22:58:28 2021
+
+@author: Thomas Pingel
+"""
+
 import numpy as np
-import pandas as pd
-import geopandas
-from shapely.geometry import LineString
-from skimage.graph import MCP_Geometric, MCP
-from skimage import graph
-from pyproj import Transformer
-from scipy import stats
+import igraph
+import lcp
+from joblib import Parallel, delayed
+
+import time
+from numba import jit
+
+#%%
+tic = time.time()
+k = 1000
+X = np.random.rand(k,k)
+df = lcp.create_raster_network(X)
+df['weight'] = df.loc[:,['source_value','target_value']].mean(axis=1)
+
+G = igraph.Graph()
+G.add_vertices(k**2)
+G.add_edges(list(zip(df.source,df.target)),attributes={'weight':df.weight})
+
+starts = list(np.random.randint(0,k**2-1,10))
+ends = [list(np.random.randint(0,k**2-1,10)) for i in range(len(starts))]
+toc = time.time()
+print(toc-tic)
+
+#%%
+tic = time.time()
+routes = [G.get_shortest_paths(item[0],item[1],weights='weight') for item in zip(starts,ends)]
+toc = time.time()
+print(toc-tic)
+
+#%%
+tic = time.time()
+#params = list(zip(starts,ends))
+result = Parallel(n_jobs=-1)(delayed(G.copy().get_shortest_paths)(item[0],item[1],weights='weight') for item in zip(starts,ends))
+toc = time.time()
+print(toc-tic)
+#%%
 
 def cost_tobler_hiking_function(S,symmetric=True):
     """
@@ -298,7 +333,7 @@ def get_areal_routes(nodes,edges,surface,meta,label='areal'):
     return gdf
 
 
-
+@jit(nopython=True)
 def create_raster_network(X):
     """
     Simple Example:
